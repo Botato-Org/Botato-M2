@@ -220,20 +220,4 @@ Values marked `TUNE(...)` in the config headers. Run the test, copy the field.
 
 ---
 
-## 7. Code style
-
-`Core/App/**` and `main_test.cpp` only (CubeMX files stay as generated). Format with
-`clang-format -i` (repo `.clang-format`).
-
-| Where | Form |
-|---|---|
-| File top | `/** @file Name  @brief one line */` |
-| Class / struct | `/** … */`, ≤ 3 lines |
-| Section | `// ---- Name ----…` to column 80 |
-| Declaration | trailing `// unit · meaning` |
-| Tunable | trailing `// TUNE(TEST_X): …` or `TUNE(maze): …` |
-| Rationale | in `DECISIONS.md`, referenced as `(#n)` |
-
----
-
 *BOTATO · REV 3.0*
