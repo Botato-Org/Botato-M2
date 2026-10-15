@@ -57,27 +57,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define TOF_LEFT_INT_Pin GPIO_PIN_2
-#define TOF_LEFT_INT_GPIO_Port GPIOA
-#define TOF_LEFT_INT_EXTI_IRQn EXTI2_IRQn
-#define TOF_LF_INT_Pin GPIO_PIN_3
-#define TOF_LF_INT_GPIO_Port GPIOA
-#define TOF_LF_INT_EXTI_IRQn EXTI3_IRQn
-#define TOF_FRONT_INT_Pin GPIO_PIN_4
-#define TOF_FRONT_INT_GPIO_Port GPIOA
-#define TOF_FRONT_INT_EXTI_IRQn EXTI4_IRQn
 #define BTN1_Pin GPIO_PIN_5
 #define BTN1_GPIO_Port GPIOA
 #define BTN2_Pin GPIO_PIN_6
 #define BTN2_GPIO_Port GPIOA
 #define XSHUT_RF_Pin GPIO_PIN_7
 #define XSHUT_RF_GPIO_Port GPIOA
-#define TOF_RF_INT_Pin GPIO_PIN_0
-#define TOF_RF_INT_GPIO_Port GPIOB
-#define TOF_RF_INT_EXTI_IRQn EXTI0_IRQn
-#define TOF_RIGHT_INT_Pin GPIO_PIN_1
-#define TOF_RIGHT_INT_GPIO_Port GPIOB
-#define TOF_RIGHT_INT_EXTI_IRQn EXTI1_IRQn
 #define AIN1_Pin GPIO_PIN_12
 #define AIN1_GPIO_Port GPIOB
 #define AIN2_Pin GPIO_PIN_13
