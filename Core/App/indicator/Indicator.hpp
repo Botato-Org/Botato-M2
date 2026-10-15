@@ -1,21 +1,15 @@
+/**
+ * @file  Indicator.hpp
+ * @brief Non-blocking status LED; update() every main-loop pass.
+ */
 #ifndef APP_INDICATOR_HPP
 #define APP_INDICATOR_HPP
 
 #include <cstdint>
 
-/*
- * Indicator — status LED, non-blocking. update() every main-loop pass.
- *
- * Competition behaviour:
- *   BLINK      while the gyro calibrates (0.5s on / 0.5s off)
- *   OFF        once calibrated, and whenever idle or running
- *   pulse()    one short flash per navigation decision, then back to OFF
- *   code(n)    fault: n quick flashes, pause, repeat (ModeController::Fault)
- *   HEARTBEAT  idle in CURVED speed-run mode: short flash once a second
- *              (normal mode: OFF when idle)
- *   solid ON   Error_Handler (HAL init failure)
- *
- * Test builds: PASS = code(2), FAIL = code(3).
+/**
+ * BLINK calibrating, OFF idle/running, pulse() per decision, code(n) fault, HEARTBEAT idle in
+ * curved mode, solid ON Error_Handler. Test builds: PASS = code(2), FAIL = code(3).
  */
 class Indicator {
 public:
@@ -23,8 +17,8 @@ public:
 
     void init();
     void set(Pattern p);
-    void code(int flashes);       // fault code: n flashes, pause, repeat
-    void pulse();                 // one flash over the current pattern
+    void code(int flashes);  // fault code: n flashes, pause, repeat
+    void pulse();            // one flash over the current pattern
     void update();
 
     Pattern pattern() const { return pattern_; }
@@ -39,4 +33,4 @@ private:
     void write(bool on);
 };
 
-#endif // APP_INDICATOR_HPP
+#endif  // APP_INDICATOR_HPP

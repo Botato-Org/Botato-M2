@@ -1,0 +1,65 @@
+# BOTATO code style — applies to Core/App/** and Core/Src/main_test.cpp.
+# CubeMX-generated files (Core/Src, Core/Inc, Drivers) are NOT formatted.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++17
+
+# Layout
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: true
+IndentExternBlock: NoIndent
+IndentPPDirectives: None
+NamespaceIndentation: None
+FixNamespaceComments: true
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtStartOfBlock: false
+  AtStartOfFile: false
+
+# Braces
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Always
+AllowShortEnumsOnASingleLine: true
+
+# Alignment
+AlignConsecutiveMacros: Consecutive
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AlignFunctionDeclarations: false
+  AlignFunctionPointers: false
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+SpacesBeforeTrailingComments: 2
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# Includes: order matters around extern "C" and the HAL — never reorder.
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# Misc
+Cpp11BracedListStyle: true
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: NextLine
+ReflowComments: true
+# Keep "//#define TEST_X" toggles exactly as written (main_test.cpp, Config.h).
+SpacesInLineCommentPrefix:
+  Minimum: 0
+  Maximum: -1

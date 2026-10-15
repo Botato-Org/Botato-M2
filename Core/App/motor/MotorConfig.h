@@ -1,13 +1,15 @@
+/**
+ * @file  MotorConfig.h
+ * @brief Motor dead-band.
+ */
 #ifndef APP_MOTORCONFIG_H
 #define APP_MOTORCONFIG_H
 
 namespace motorcfg {
 
-// Minimum PWM that actually turns a wheel against static friction. Any
-// non-zero command is scaled into [DEADBAND, PWM_MAX]. Tune with TEST_MOTOR:
-// raise it if a wheel stalls at low command, lower it if the robot jerks.
-constexpr int DEADBAND = 500;
+// Non-zero commands are scaled into [DEADBAND, PWM_MAX].
+constexpr int DEADBAND = 500;  // TUNE(TEST_MOTOR): raise if a wheel stalls, lower if jerky
 
-} // namespace motorcfg
+}  // namespace motorcfg
 
-#endif // APP_MOTORCONFIG_H
+#endif  // APP_MOTORCONFIG_H

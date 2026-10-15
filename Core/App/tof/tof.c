@@ -1,107 +1,99 @@
+/**
+ * @file  tof.c
+ * @brief VL53L0X driver: register access, ST init sequence, continuous ranging, filter.
+ */
 #include "tof.h"
 
-/* ---- Register map ------------------------------------------------------
- * Verified against the complete published VL53L0X register set. Note:
- * I2C_SLAVE_DEVICE_ADDRESS is correctly 0x8A here — some published
- * community ports mistakenly define this as 0x52 (the DEFAULT device
- * address) and then reuse that same wrong value as the register for
- * changing the address, which breaks multi-device address assignment
- * entirely. Fixed here.                                                */
+// ---- Register map -----------------------------------------------------------
+// NOTE: I2C_SLAVE_DEVICE_ADDRESS is 0x8A (some ports wrongly use 0x52, the default address).
 
 #define REG_SYSRANGE_START                              0x00
-#define REG_SYSTEM_SEQUENCE_CONFIG                       0x01
-#define REG_SYSTEM_INTERMEASUREMENT_PERIOD               0x04
-#define REG_SYSTEM_INTERRUPT_CONFIG_GPIO                 0x0A
-#define REG_SYSTEM_INTERRUPT_CLEAR                       0x0B
-#define REG_RESULT_INTERRUPT_STATUS                      0x13
-#define REG_RESULT_RANGE_STATUS                          0x14
-#define REG_I2C_SLAVE_DEVICE_ADDRESS                     0x8A
-#define REG_MSRC_CONFIG_CONTROL                          0x60
-#define REG_PRE_RANGE_CONFIG_VALID_PHASE_LOW             0x56
-#define REG_PRE_RANGE_CONFIG_VALID_PHASE_HIGH            0x57
-#define REG_FINAL_RANGE_CONFIG_VALID_PHASE_LOW           0x47
-#define REG_FINAL_RANGE_CONFIG_VALID_PHASE_HIGH          0x48
-#define REG_FINAL_RANGE_CONFIG_MIN_COUNT_RATE_RTN_LIMIT  0x44
-#define REG_PRE_RANGE_CONFIG_VCSEL_PERIOD                0x50
-#define REG_PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI           0x51
-#define REG_FINAL_RANGE_CONFIG_VCSEL_PERIOD              0x70
-#define REG_FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI         0x71
-#define REG_MSRC_CONFIG_TIMEOUT_MACROP                   0x46
-#define REG_IDENTIFICATION_MODEL_ID                      0xC0
-#define REG_GPIO_HV_MUX_ACTIVE_HIGH                      0x84
-#define REG_GLOBAL_CONFIG_SPAD_ENABLES_REF_0             0xB0
-#define REG_GLOBAL_CONFIG_REF_EN_START_SELECT            0xB6
-#define REG_DYNAMIC_SPAD_NUM_REQUESTED_REF_SPAD          0x4E
-#define REG_DYNAMIC_SPAD_REF_EN_START_OFFSET             0x4F
-#define REG_VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV            0x89
+#define REG_SYSTEM_SEQUENCE_CONFIG                      0x01
+#define REG_SYSTEM_INTERMEASUREMENT_PERIOD              0x04
+#define REG_SYSTEM_INTERRUPT_CONFIG_GPIO                0x0A
+#define REG_SYSTEM_INTERRUPT_CLEAR                      0x0B
+#define REG_RESULT_INTERRUPT_STATUS                     0x13
+#define REG_RESULT_RANGE_STATUS                         0x14
+#define REG_I2C_SLAVE_DEVICE_ADDRESS                    0x8A
+#define REG_MSRC_CONFIG_CONTROL                         0x60
+#define REG_PRE_RANGE_CONFIG_VALID_PHASE_LOW            0x56
+#define REG_PRE_RANGE_CONFIG_VALID_PHASE_HIGH           0x57
+#define REG_FINAL_RANGE_CONFIG_VALID_PHASE_LOW          0x47
+#define REG_FINAL_RANGE_CONFIG_VALID_PHASE_HIGH         0x48
+#define REG_FINAL_RANGE_CONFIG_MIN_COUNT_RATE_RTN_LIMIT 0x44
+#define REG_PRE_RANGE_CONFIG_VCSEL_PERIOD               0x50
+#define REG_PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI          0x51
+#define REG_FINAL_RANGE_CONFIG_VCSEL_PERIOD             0x70
+#define REG_FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI        0x71
+#define REG_MSRC_CONFIG_TIMEOUT_MACROP                  0x46
+#define REG_IDENTIFICATION_MODEL_ID                     0xC0
+#define REG_GPIO_HV_MUX_ACTIVE_HIGH                     0x84
+#define REG_GLOBAL_CONFIG_SPAD_ENABLES_REF_0            0xB0
+#define REG_GLOBAL_CONFIG_REF_EN_START_SELECT           0xB6
+#define REG_DYNAMIC_SPAD_NUM_REQUESTED_REF_SPAD         0x4E
+#define REG_DYNAMIC_SPAD_REF_EN_START_OFFSET            0x4F
+#define REG_VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV           0x89
+#define REG_OSC_CALIBRATE_VAL                           0xF8
 
 #define IO_TIMEOUT_MS 100
 
-/* ---- Low-level register access ----------------------------------------- */
+// ---- Low-level register access ----------------------------------------------
 
-static HAL_StatusTypeDef WriteReg8(VL53L0X_Dev_t *dev, uint8_t reg, uint8_t val)
-{
-    return HAL_I2C_Mem_Write(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT,
-                              &val, 1, IO_TIMEOUT_MS);
+static HAL_StatusTypeDef WriteReg8(VL53L0X_Dev_t* dev, uint8_t reg, uint8_t val) {
+    return HAL_I2C_Mem_Write(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT, &val, 1,
+                             IO_TIMEOUT_MS);
 }
 
-static HAL_StatusTypeDef ReadReg8(VL53L0X_Dev_t *dev, uint8_t reg, uint8_t *out)
-{
-    return HAL_I2C_Mem_Read(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT,
-                             out, 1, IO_TIMEOUT_MS);
+static HAL_StatusTypeDef ReadReg8(VL53L0X_Dev_t* dev, uint8_t reg, uint8_t* out) {
+    return HAL_I2C_Mem_Read(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT, out, 1,
+                            IO_TIMEOUT_MS);
 }
 
-static HAL_StatusTypeDef WriteReg16(VL53L0X_Dev_t *dev, uint8_t reg, uint16_t val)
-{
-    uint8_t buf[2] = { (uint8_t)(val >> 8), (uint8_t)(val & 0xFF) };
-    return HAL_I2C_Mem_Write(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT,
-                              buf, 2, IO_TIMEOUT_MS);
+static HAL_StatusTypeDef WriteReg16(VL53L0X_Dev_t* dev, uint8_t reg, uint16_t val) {
+    uint8_t buf[2] = {(uint8_t)(val >> 8), (uint8_t)(val & 0xFF)};
+    return HAL_I2C_Mem_Write(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT, buf, 2,
+                             IO_TIMEOUT_MS);
 }
 
-static HAL_StatusTypeDef ReadReg16(VL53L0X_Dev_t *dev, uint8_t reg, uint16_t *out)
-{
-    uint8_t buf[2];
-    HAL_StatusTypeDef st = HAL_I2C_Mem_Read(dev->hi2c, dev->address, reg,
-                                             I2C_MEMADD_SIZE_8BIT, buf, 2, IO_TIMEOUT_MS);
+static HAL_StatusTypeDef ReadReg16(VL53L0X_Dev_t* dev, uint8_t reg, uint16_t* out) {
+    uint8_t           buf[2];
+    HAL_StatusTypeDef st =
+        HAL_I2C_Mem_Read(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT, buf, 2, IO_TIMEOUT_MS);
     if (st == HAL_OK) *out = (uint16_t)((buf[0] << 8) | buf[1]);
     return st;
 }
 
-static HAL_StatusTypeDef WriteMulti(VL53L0X_Dev_t *dev, uint8_t reg, const uint8_t *src, uint8_t count)
-{
-    return HAL_I2C_Mem_Write(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT,
-                              (uint8_t *)src, count, IO_TIMEOUT_MS);
+static HAL_StatusTypeDef WriteMulti(VL53L0X_Dev_t* dev, uint8_t reg, const uint8_t* src,
+                                    uint8_t count) {
+    return HAL_I2C_Mem_Write(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT, (uint8_t*)src,
+                             count, IO_TIMEOUT_MS);
 }
 
-static HAL_StatusTypeDef ReadMulti(VL53L0X_Dev_t *dev, uint8_t reg, uint8_t *dst, uint8_t count)
-{
-    return HAL_I2C_Mem_Read(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT,
-                             dst, count, IO_TIMEOUT_MS);
+static HAL_StatusTypeDef ReadMulti(VL53L0X_Dev_t* dev, uint8_t reg, uint8_t* dst, uint8_t count) {
+    return HAL_I2C_Mem_Read(dev->hi2c, dev->address, reg, I2C_MEMADD_SIZE_8BIT, dst, count,
+                            IO_TIMEOUT_MS);
 }
 
-/* ---- Timeout math (verbatim from the verified reference) --------------- */
+// ---- Timeout math (ST reference) --------------------------------------------
 
-static uint16_t DecodeVcselPeriod(uint8_t reg_val) { return (uint16_t)((reg_val + 1) << 1); }
+static uint16_t DecodeVcselPeriod(uint8_t reg_val) {
+    return (uint16_t)((reg_val + 1) << 1);
+}
 
-static uint32_t CalcMacroPeriodNs(uint8_t vcsel_period_pclks)
-{
+static uint32_t CalcMacroPeriodNs(uint8_t vcsel_period_pclks) {
     return (((uint32_t)2304 * vcsel_period_pclks * 1655) + 500) / 1000;
 }
 
-static uint16_t DecodeTimeout(uint16_t reg_val)
-{
+static uint16_t DecodeTimeout(uint16_t reg_val) {
     return (uint16_t)(((reg_val & 0x00FF) << ((reg_val & 0xFF00) >> 8)) + 1);
 }
 
-static uint16_t EncodeTimeout(uint16_t timeout_mclks)
-{
+static uint16_t EncodeTimeout(uint16_t timeout_mclks) {
     uint32_t ls_byte = 0;
     uint16_t ms_byte = 0;
-    if (timeout_mclks > 0)
-    {
+    if (timeout_mclks > 0) {
         ls_byte = timeout_mclks - 1;
-        while ((ls_byte & 0xFFFFFF00) > 0)
-        {
+        while ((ls_byte & 0xFFFFFF00) > 0) {
             ls_byte >>= 1;
             ms_byte++;
         }
@@ -110,19 +102,17 @@ static uint16_t EncodeTimeout(uint16_t timeout_mclks)
     return 0;
 }
 
-static uint32_t TimeoutMclksToUs(uint16_t timeout_mclks, uint8_t vcsel_period_pclks)
-{
+static uint32_t TimeoutMclksToUs(uint16_t timeout_mclks, uint8_t vcsel_period_pclks) {
     uint32_t macro_period_ns = CalcMacroPeriodNs(vcsel_period_pclks);
     return ((timeout_mclks * macro_period_ns) + (macro_period_ns / 2)) / 1000;
 }
 
-static uint32_t TimeoutUsToMclks(uint32_t timeout_us, uint8_t vcsel_period_pclks)
-{
+static uint32_t TimeoutUsToMclks(uint32_t timeout_us, uint8_t vcsel_period_pclks) {
     uint32_t macro_period_ns = CalcMacroPeriodNs(vcsel_period_pclks);
     return (((timeout_us * 1000) + (macro_period_ns / 2)) / macro_period_ns);
 }
 
-/* ---- Sequence step enable / timeout readback ---------------------------- */
+// ---- Sequence step enable / timeout readback --------------------------------
 
 typedef struct {
     bool tcc, msrc, dss, pre_range, final_range;
@@ -134,8 +124,7 @@ typedef struct {
     uint32_t msrc_dss_tcc_us, pre_range_us, final_range_us;
 } SeqTimeouts;
 
-static void GetSequenceStepEnables(VL53L0X_Dev_t *dev, SeqEnables *e)
-{
+static void GetSequenceStepEnables(VL53L0X_Dev_t* dev, SeqEnables* e) {
     uint8_t cfg = 0;
     ReadReg8(dev, REG_SYSTEM_SEQUENCE_CONFIG, &cfg);
     e->tcc         = (cfg >> 4) & 0x1;
@@ -145,16 +134,15 @@ static void GetSequenceStepEnables(VL53L0X_Dev_t *dev, SeqEnables *e)
     e->final_range = (cfg >> 7) & 0x1;
 }
 
-static uint8_t GetVcselPulsePeriod(VL53L0X_Dev_t *dev, bool final_range)
-{
+static uint8_t GetVcselPulsePeriod(VL53L0X_Dev_t* dev, bool final_range) {
     uint8_t raw = 0;
-    ReadReg8(dev, final_range ? REG_FINAL_RANGE_CONFIG_VCSEL_PERIOD
-                               : REG_PRE_RANGE_CONFIG_VCSEL_PERIOD, &raw);
+    ReadReg8(dev,
+             final_range ? REG_FINAL_RANGE_CONFIG_VCSEL_PERIOD : REG_PRE_RANGE_CONFIG_VCSEL_PERIOD,
+             &raw);
     return (uint8_t)DecodeVcselPeriod(raw);
 }
 
-static void GetSequenceStepTimeouts(VL53L0X_Dev_t *dev, const SeqEnables *e, SeqTimeouts *t)
-{
+static void GetSequenceStepTimeouts(VL53L0X_Dev_t* dev, const SeqEnables* e, SeqTimeouts* t) {
     uint8_t  msrc_raw = 0;
     uint16_t pre_raw = 0, final_raw = 0;
 
@@ -166,49 +154,44 @@ static void GetSequenceStepTimeouts(VL53L0X_Dev_t *dev, const SeqEnables *e, Seq
 
     ReadReg16(dev, REG_PRE_RANGE_CONFIG_TIMEOUT_MACROP_HI, &pre_raw);
     t->pre_range_mclks = DecodeTimeout(pre_raw);
-    t->pre_range_us = TimeoutMclksToUs(t->pre_range_mclks, t->pre_range_vcsel_period_pclks);
+    t->pre_range_us    = TimeoutMclksToUs(t->pre_range_mclks, t->pre_range_vcsel_period_pclks);
 
     t->final_range_vcsel_period_pclks = GetVcselPulsePeriod(dev, true);
 
     ReadReg16(dev, REG_FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI, &final_raw);
     t->final_range_mclks = DecodeTimeout(final_raw);
-    if (e->pre_range)
-    {
-        t->final_range_mclks -= t->pre_range_mclks;
-    }
+    if (e->pre_range) { t->final_range_mclks -= t->pre_range_mclks; }
     t->final_range_us = TimeoutMclksToUs(t->final_range_mclks, t->final_range_vcsel_period_pclks);
 }
 
-static uint32_t GetMeasurementTimingBudget(VL53L0X_Dev_t *dev)
-{
-    SeqEnables  e;
-    SeqTimeouts t;
-    const uint16_t StartOverhead = 1910, EndOverhead = 960, MsrcOverhead = 660,
-                   TccOverhead = 590, DssOverhead = 690, PreRangeOverhead = 660,
-                   FinalRangeOverhead = 550;
+static uint32_t GetMeasurementTimingBudget(VL53L0X_Dev_t* dev) {
+    SeqEnables     e;
+    SeqTimeouts    t;
+    const uint16_t StartOverhead = 1910, EndOverhead = 960, MsrcOverhead = 660, TccOverhead = 590,
+                   DssOverhead = 690, PreRangeOverhead = 660, FinalRangeOverhead = 550;
 
     GetSequenceStepEnables(dev, &e);
     GetSequenceStepTimeouts(dev, &e, &t);
 
     uint32_t budget_us = StartOverhead + EndOverhead;
 
-    if (e.tcc)         budget_us += t.msrc_dss_tcc_us + TccOverhead;
-    if (e.dss)         budget_us += 2 * (t.msrc_dss_tcc_us + DssOverhead);
-    else if (e.msrc)   budget_us += t.msrc_dss_tcc_us + MsrcOverhead;
-    if (e.pre_range)   budget_us += t.pre_range_us + PreRangeOverhead;
+    if (e.tcc) budget_us += t.msrc_dss_tcc_us + TccOverhead;
+    if (e.dss)
+        budget_us += 2 * (t.msrc_dss_tcc_us + DssOverhead);
+    else if (e.msrc)
+        budget_us += t.msrc_dss_tcc_us + MsrcOverhead;
+    if (e.pre_range) budget_us += t.pre_range_us + PreRangeOverhead;
     if (e.final_range) budget_us += t.final_range_us + FinalRangeOverhead;
 
     dev->measurement_timing_budget_us = budget_us;
     return budget_us;
 }
 
-static bool SetMeasurementTimingBudget(VL53L0X_Dev_t *dev, uint32_t budget_us)
-{
-    SeqEnables  e;
-    SeqTimeouts t;
-    const uint16_t StartOverhead = 1320, EndOverhead = 960, MsrcOverhead = 660,
-                   TccOverhead = 590, DssOverhead = 690, PreRangeOverhead = 660,
-                   FinalRangeOverhead = 550;
+static bool SetMeasurementTimingBudget(VL53L0X_Dev_t* dev, uint32_t budget_us) {
+    SeqEnables     e;
+    SeqTimeouts    t;
+    const uint16_t StartOverhead = 1320, EndOverhead = 960, MsrcOverhead = 660, TccOverhead = 590,
+                   DssOverhead = 690, PreRangeOverhead = 660, FinalRangeOverhead = 550;
     const uint32_t MinTimingBudget = 20000;
 
     if (budget_us < MinTimingBudget) return false;
@@ -218,30 +201,32 @@ static bool SetMeasurementTimingBudget(VL53L0X_Dev_t *dev, uint32_t budget_us)
 
     uint32_t used_us = StartOverhead + EndOverhead;
 
-    if (e.tcc)       used_us += t.msrc_dss_tcc_us + TccOverhead;
-    if (e.dss)       used_us += 2 * (t.msrc_dss_tcc_us + DssOverhead);
-    else if (e.msrc) used_us += t.msrc_dss_tcc_us + MsrcOverhead;
+    if (e.tcc) used_us += t.msrc_dss_tcc_us + TccOverhead;
+    if (e.dss)
+        used_us += 2 * (t.msrc_dss_tcc_us + DssOverhead);
+    else if (e.msrc)
+        used_us += t.msrc_dss_tcc_us + MsrcOverhead;
     if (e.pre_range) used_us += t.pre_range_us + PreRangeOverhead;
 
-    if (e.final_range)
-    {
+    if (e.final_range) {
         used_us += FinalRangeOverhead;
         if (used_us > budget_us) return false;
 
         uint32_t final_us = budget_us - used_us;
-        uint32_t final_mclks = TimeoutUsToMclks((uint32_t)final_us, (uint8_t)t.final_range_vcsel_period_pclks);
+        uint32_t final_mclks =
+            TimeoutUsToMclks((uint32_t)final_us, (uint8_t)t.final_range_vcsel_period_pclks);
         if (e.pre_range) final_mclks += t.pre_range_mclks;
 
-        WriteReg16(dev, REG_FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI, EncodeTimeout((uint16_t)final_mclks));
+        WriteReg16(dev, REG_FINAL_RANGE_CONFIG_TIMEOUT_MACROP_HI,
+                   EncodeTimeout((uint16_t)final_mclks));
         dev->measurement_timing_budget_us = budget_us;
     }
     return true;
 }
 
-/* ---- SPAD info + reference SPAD setup (verbatim algorithm) -------------- */
+// ---- SPAD info + reference SPAD setup (ST reference) ------------------------
 
-static bool GetSpadInfo(VL53L0X_Dev_t *dev, uint8_t *count, bool *type_is_aperture)
-{
+static bool GetSpadInfo(VL53L0X_Dev_t* dev, uint8_t* count, bool* type_is_aperture) {
     uint8_t tmp = 0;
 
     WriteReg8(dev, 0x80, 0x01);
@@ -258,7 +243,7 @@ static bool GetSpadInfo(VL53L0X_Dev_t *dev, uint8_t *count, bool *type_is_apertu
     WriteReg8(dev, 0x83, 0x01);
 
     ReadReg8(dev, 0x92, &tmp);
-    *count = tmp & 0x7F;
+    *count            = tmp & 0x7F;
     *type_is_aperture = (bool)((tmp >> 7) & 0x01);
 
     WriteReg8(dev, 0x81, 0x00);
@@ -273,18 +258,15 @@ static bool GetSpadInfo(VL53L0X_Dev_t *dev, uint8_t *count, bool *type_is_apertu
     return true;
 }
 
-/* ---- Reference calibration (VHV + phase) --------------------------------
- * Short, standard sequence: trigger with the VHV init byte set, wait for
- * the interrupt status bit, clear it, then stop.                        */
-static bool PerformSingleRefCalibration(VL53L0X_Dev_t *dev, uint8_t vhv_init_byte)
-{
-    uint8_t status_reg = 0;
-    uint32_t t0 = HAL_GetTick();
+// ---- Reference calibration (VHV + phase) ------------------------------------
+// Trigger with the VHV init byte set, wait for the interrupt bit, clear it, stop.
+static bool PerformSingleRefCalibration(VL53L0X_Dev_t* dev, uint8_t vhv_init_byte) {
+    uint8_t  status_reg = 0;
+    uint32_t t0         = HAL_GetTick();
 
     WriteReg8(dev, REG_SYSRANGE_START, (uint8_t)(0x01 | vhv_init_byte));
 
-    do
-    {
+    do {
         ReadReg8(dev, REG_RESULT_INTERRUPT_STATUS, &status_reg);
         if ((HAL_GetTick() - t0) > IO_TIMEOUT_MS) return false;
     } while ((status_reg & 0x07) == 0);
@@ -295,27 +277,22 @@ static bool PerformSingleRefCalibration(VL53L0X_Dev_t *dev, uint8_t vhv_init_byt
     return true;
 }
 
-/* ---- Public API ---------------------------------------------------------- */
+// ---- Public API -------------------------------------------------------------
 
-HAL_StatusTypeDef VL53L0X_SetAddress(VL53L0X_Dev_t *dev, uint8_t new_addr_8bit)
-{
-    HAL_StatusTypeDef st = WriteReg8(dev, REG_I2C_SLAVE_DEVICE_ADDRESS,
-                                      (uint8_t)((new_addr_8bit >> 1) & 0x7F));
-    if (st == HAL_OK)
-    {
-        dev->address = new_addr_8bit;
-    }
+HAL_StatusTypeDef VL53L0X_SetAddress(VL53L0X_Dev_t* dev, uint8_t new_addr_8bit) {
+    HAL_StatusTypeDef st =
+        WriteReg8(dev, REG_I2C_SLAVE_DEVICE_ADDRESS, (uint8_t)((new_addr_8bit >> 1) & 0x7F));
+    if (st == HAL_OK) { dev->address = new_addr_8bit; }
     return st;
 }
 
-HAL_StatusTypeDef VL53L0X_Init(VL53L0X_Dev_t *dev, I2C_HandleTypeDef *hi2c, uint8_t addr_8bit)
-{
+HAL_StatusTypeDef VL53L0X_Init(VL53L0X_Dev_t* dev, I2C_HandleTypeDef* hi2c, uint8_t addr_8bit) {
     dev->hi2c    = hi2c;
     dev->address = addr_8bit;
 
-    /* ---- DataInit ---- */
+    // ---- DataInit -----------------------------------------------------------
 
-    /* 2.8V I/O mode — most breakout boards need this bit set. */
+    // 2.8V I/O mode — most breakout boards need this bit set.
     uint8_t vhv = 0;
     ReadReg8(dev, REG_VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV, &vhv);
     WriteReg8(dev, REG_VHV_CONFIG_PAD_SCL_SDA__EXTSUP_HV, (uint8_t)(vhv | 0x01));
@@ -329,19 +306,19 @@ HAL_StatusTypeDef VL53L0X_Init(VL53L0X_Dev_t *dev, I2C_HandleTypeDef *hi2c, uint
     WriteReg8(dev, 0xFF, 0x00);
     WriteReg8(dev, 0x80, 0x00);
 
-    /* Disable SIGNAL_RATE_MSRC and SIGNAL_RATE_PRE_RANGE limit checks. */
+    // Disable SIGNAL_RATE_MSRC and SIGNAL_RATE_PRE_RANGE limit checks.
     uint8_t msrc_ctrl = 0;
     ReadReg8(dev, REG_MSRC_CONFIG_CONTROL, &msrc_ctrl);
     WriteReg8(dev, REG_MSRC_CONFIG_CONTROL, (uint8_t)(msrc_ctrl | 0x12));
 
-    /* Final range signal rate limit: 0.25 Mcps, Q9.7 fixed point. */
+    // Final range signal rate limit: 0.25 Mcps, Q9.7 fixed point.
     WriteReg16(dev, REG_FINAL_RANGE_CONFIG_MIN_COUNT_RATE_RTN_LIMIT, (uint16_t)(0.25f * (1 << 7)));
 
     WriteReg8(dev, REG_SYSTEM_SEQUENCE_CONFIG, 0xFF);
 
-    /* ---- StaticInit: SPAD configuration ---- */
+    // ---- StaticInit: SPAD configuration -------------------------------------
 
-    uint8_t spad_count = 0;
+    uint8_t spad_count       = 0;
     bool    spad_is_aperture = false;
     if (!GetSpadInfo(dev, &spad_count, &spad_is_aperture)) return HAL_ERROR;
 
@@ -354,54 +331,100 @@ HAL_StatusTypeDef VL53L0X_Init(VL53L0X_Dev_t *dev, I2C_HandleTypeDef *hi2c, uint
     WriteReg8(dev, 0xFF, 0x00);
     WriteReg8(dev, REG_GLOBAL_CONFIG_REF_EN_START_SELECT, 0xB4);
 
-    uint8_t first_spad = spad_is_aperture ? 12 : 0;
+    uint8_t first_spad    = spad_is_aperture ? 12 : 0;
     uint8_t spads_enabled = 0;
-    for (uint8_t i = 0; i < 48; i++)
-    {
-        if (i < first_spad || spads_enabled == spad_count)
-        {
+    for (uint8_t i = 0; i < 48; i++) {
+        if (i < first_spad || spads_enabled == spad_count) {
             ref_spad_map[i / 8] &= (uint8_t)~(1 << (i % 8));
-        }
-        else if ((ref_spad_map[i / 8] >> (i % 8)) & 0x1)
-        {
+        } else if ((ref_spad_map[i / 8] >> (i % 8)) & 0x1) {
             spads_enabled++;
         }
     }
     WriteMulti(dev, REG_GLOBAL_CONFIG_SPAD_ENABLES_REF_0, ref_spad_map, 6);
 
-    /* ---- StaticInit: default tuning settings ----
-     * Verbatim register sequence from the verified reference implementation.
-     * Each of these addresses specific analog/timing configuration inside
-     * the sensor — do not reorder or omit entries.                         */
-    WriteReg8(dev, 0xFF, 0x01); WriteReg8(dev, 0x00, 0x00); WriteReg8(dev, 0xFF, 0x00);
-    WriteReg8(dev, 0x09, 0x00); WriteReg8(dev, 0x10, 0x00); WriteReg8(dev, 0x11, 0x00);
-    WriteReg8(dev, 0x24, 0x01); WriteReg8(dev, 0x25, 0xFF); WriteReg8(dev, 0x75, 0x00);
-    WriteReg8(dev, 0xFF, 0x01); WriteReg8(dev, 0x4E, 0x2C); WriteReg8(dev, 0x48, 0x00);
-    WriteReg8(dev, 0x30, 0x20); WriteReg8(dev, 0xFF, 0x00); WriteReg8(dev, 0x30, 0x09);
-    WriteReg8(dev, 0x54, 0x00); WriteReg8(dev, 0x31, 0x04); WriteReg8(dev, 0x32, 0x03);
-    WriteReg8(dev, 0x40, 0x83); WriteReg8(dev, 0x46, 0x25); WriteReg8(dev, 0x60, 0x00);
-    WriteReg8(dev, 0x27, 0x00); WriteReg8(dev, 0x50, 0x06); WriteReg8(dev, 0x51, 0x00);
-    WriteReg8(dev, 0x52, 0x96); WriteReg8(dev, 0x56, 0x08); WriteReg8(dev, 0x57, 0x30);
-    WriteReg8(dev, 0x61, 0x00); WriteReg8(dev, 0x62, 0x00); WriteReg8(dev, 0x64, 0x00);
-    WriteReg8(dev, 0x65, 0x00); WriteReg8(dev, 0x66, 0xA0); WriteReg8(dev, 0xFF, 0x01);
-    WriteReg8(dev, 0x22, 0x32); WriteReg8(dev, 0x47, 0x14); WriteReg8(dev, 0x49, 0xFF);
-    WriteReg8(dev, 0x4A, 0x00); WriteReg8(dev, 0xFF, 0x00); WriteReg8(dev, 0x7A, 0x0A);
-    WriteReg8(dev, 0x7B, 0x00); WriteReg8(dev, 0x78, 0x21); WriteReg8(dev, 0xFF, 0x01);
-    WriteReg8(dev, 0x23, 0x34); WriteReg8(dev, 0x42, 0x00); WriteReg8(dev, 0x44, 0xFF);
-    WriteReg8(dev, 0x45, 0x26); WriteReg8(dev, 0x46, 0x05); WriteReg8(dev, 0x40, 0x40);
-    WriteReg8(dev, 0x0E, 0x06); WriteReg8(dev, 0x20, 0x1A); WriteReg8(dev, 0x43, 0x40);
-    WriteReg8(dev, 0xFF, 0x00); WriteReg8(dev, 0x34, 0x03); WriteReg8(dev, 0x35, 0x44);
-    WriteReg8(dev, 0xFF, 0x01); WriteReg8(dev, 0x31, 0x04); WriteReg8(dev, 0x4B, 0x09);
-    WriteReg8(dev, 0x4C, 0x05); WriteReg8(dev, 0x4D, 0x04); WriteReg8(dev, 0xFF, 0x00);
-    WriteReg8(dev, 0x44, 0x00); WriteReg8(dev, 0x45, 0x20); WriteReg8(dev, 0x47, 0x08);
-    WriteReg8(dev, 0x48, 0x28); WriteReg8(dev, 0x67, 0x00); WriteReg8(dev, 0x70, 0x04);
-    WriteReg8(dev, 0x71, 0x01); WriteReg8(dev, 0x72, 0xFE); WriteReg8(dev, 0x76, 0x00);
-    WriteReg8(dev, 0x77, 0x00); WriteReg8(dev, 0xFF, 0x01); WriteReg8(dev, 0x0D, 0x01);
-    WriteReg8(dev, 0xFF, 0x00); WriteReg8(dev, 0x80, 0x01); WriteReg8(dev, 0x01, 0xF8);
-    WriteReg8(dev, 0xFF, 0x01); WriteReg8(dev, 0x8E, 0x01); WriteReg8(dev, 0x00, 0x01);
-    WriteReg8(dev, 0xFF, 0x00); WriteReg8(dev, 0x80, 0x00);
+    // ---- StaticInit: default tuning settings (ST sequence, keep order) ------
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x00, 0x00);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x09, 0x00);
+    WriteReg8(dev, 0x10, 0x00);
+    WriteReg8(dev, 0x11, 0x00);
+    WriteReg8(dev, 0x24, 0x01);
+    WriteReg8(dev, 0x25, 0xFF);
+    WriteReg8(dev, 0x75, 0x00);
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x4E, 0x2C);
+    WriteReg8(dev, 0x48, 0x00);
+    WriteReg8(dev, 0x30, 0x20);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x30, 0x09);
+    WriteReg8(dev, 0x54, 0x00);
+    WriteReg8(dev, 0x31, 0x04);
+    WriteReg8(dev, 0x32, 0x03);
+    WriteReg8(dev, 0x40, 0x83);
+    WriteReg8(dev, 0x46, 0x25);
+    WriteReg8(dev, 0x60, 0x00);
+    WriteReg8(dev, 0x27, 0x00);
+    WriteReg8(dev, 0x50, 0x06);
+    WriteReg8(dev, 0x51, 0x00);
+    WriteReg8(dev, 0x52, 0x96);
+    WriteReg8(dev, 0x56, 0x08);
+    WriteReg8(dev, 0x57, 0x30);
+    WriteReg8(dev, 0x61, 0x00);
+    WriteReg8(dev, 0x62, 0x00);
+    WriteReg8(dev, 0x64, 0x00);
+    WriteReg8(dev, 0x65, 0x00);
+    WriteReg8(dev, 0x66, 0xA0);
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x22, 0x32);
+    WriteReg8(dev, 0x47, 0x14);
+    WriteReg8(dev, 0x49, 0xFF);
+    WriteReg8(dev, 0x4A, 0x00);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x7A, 0x0A);
+    WriteReg8(dev, 0x7B, 0x00);
+    WriteReg8(dev, 0x78, 0x21);
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x23, 0x34);
+    WriteReg8(dev, 0x42, 0x00);
+    WriteReg8(dev, 0x44, 0xFF);
+    WriteReg8(dev, 0x45, 0x26);
+    WriteReg8(dev, 0x46, 0x05);
+    WriteReg8(dev, 0x40, 0x40);
+    WriteReg8(dev, 0x0E, 0x06);
+    WriteReg8(dev, 0x20, 0x1A);
+    WriteReg8(dev, 0x43, 0x40);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x34, 0x03);
+    WriteReg8(dev, 0x35, 0x44);
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x31, 0x04);
+    WriteReg8(dev, 0x4B, 0x09);
+    WriteReg8(dev, 0x4C, 0x05);
+    WriteReg8(dev, 0x4D, 0x04);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x44, 0x00);
+    WriteReg8(dev, 0x45, 0x20);
+    WriteReg8(dev, 0x47, 0x08);
+    WriteReg8(dev, 0x48, 0x28);
+    WriteReg8(dev, 0x67, 0x00);
+    WriteReg8(dev, 0x70, 0x04);
+    WriteReg8(dev, 0x71, 0x01);
+    WriteReg8(dev, 0x72, 0xFE);
+    WriteReg8(dev, 0x76, 0x00);
+    WriteReg8(dev, 0x77, 0x00);
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x0D, 0x01);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x80, 0x01);
+    WriteReg8(dev, 0x01, 0xF8);
+    WriteReg8(dev, 0xFF, 0x01);
+    WriteReg8(dev, 0x8E, 0x01);
+    WriteReg8(dev, 0x00, 0x01);
+    WriteReg8(dev, 0xFF, 0x00);
+    WriteReg8(dev, 0x80, 0x00);
 
-    /* Interrupt config: new sample ready, active low polarity. */
+    // Interrupt config: new sample ready, active low polarity.
     WriteReg8(dev, REG_SYSTEM_INTERRUPT_CONFIG_GPIO, 0x04);
     uint8_t gpio_hv = 0;
     ReadReg8(dev, REG_GPIO_HV_MUX_ACTIVE_HIGH, &gpio_hv);
@@ -410,13 +433,11 @@ HAL_StatusTypeDef VL53L0X_Init(VL53L0X_Dev_t *dev, I2C_HandleTypeDef *hi2c, uint
 
     dev->measurement_timing_budget_us = GetMeasurementTimingBudget(dev);
 
-    /* Disable MSRC and TCC by default, then re-apply the timing budget
-     * so the final-range timeout accounts for the steps actually
-     * enabled now.                                                       */
+    // Disable MSRC and TCC, then re-apply the budget for the steps now enabled.
     WriteReg8(dev, REG_SYSTEM_SEQUENCE_CONFIG, 0xE8);
     SetMeasurementTimingBudget(dev, dev->measurement_timing_budget_us);
 
-    /* ---- Reference calibration (VHV + phase) ---- */
+    // ---- Reference calibration (VHV + phase) --------------------------------
     WriteReg8(dev, REG_SYSTEM_SEQUENCE_CONFIG, 0x01);
     if (!PerformSingleRefCalibration(dev, 0x40)) return HAL_ERROR;
 
@@ -428,8 +449,7 @@ HAL_StatusTypeDef VL53L0X_Init(VL53L0X_Dev_t *dev, I2C_HandleTypeDef *hi2c, uint
     return HAL_OK;
 }
 
-HAL_StatusTypeDef VL53L0X_ReadRangeSingleMillimeters(VL53L0X_Dev_t *dev, uint16_t *out_mm)
-{
+HAL_StatusTypeDef VL53L0X_ReadRangeSingleMillimeters(VL53L0X_Dev_t* dev, uint16_t* out_mm) {
     WriteReg8(dev, 0x80, 0x01);
     WriteReg8(dev, 0xFF, 0x01);
     WriteReg8(dev, 0x00, 0x00);
@@ -440,24 +460,22 @@ HAL_StatusTypeDef VL53L0X_ReadRangeSingleMillimeters(VL53L0X_Dev_t *dev, uint16_
 
     WriteReg8(dev, REG_SYSRANGE_START, 0x01);
 
-    uint32_t t0 = HAL_GetTick();
-    uint8_t start_reg = 0;
-    do
-    {
+    uint32_t t0        = HAL_GetTick();
+    uint8_t  start_reg = 0;
+    do {
         ReadReg8(dev, REG_SYSRANGE_START, &start_reg);
         if ((HAL_GetTick() - t0) > IO_TIMEOUT_MS) return HAL_TIMEOUT;
     } while (start_reg & 0x01);
 
-    t0 = HAL_GetTick();
+    t0                 = HAL_GetTick();
     uint8_t status_reg = 0;
-    do
-    {
+    do {
         ReadReg8(dev, REG_RESULT_INTERRUPT_STATUS, &status_reg);
         if ((HAL_GetTick() - t0) > IO_TIMEOUT_MS) return HAL_TIMEOUT;
     } while ((status_reg & 0x07) == 0);
 
-    uint16_t range = 0;
-    HAL_StatusTypeDef st = ReadReg16(dev, (uint8_t)(REG_RESULT_RANGE_STATUS + 10), &range);
+    uint16_t          range = 0;
+    HAL_StatusTypeDef st    = ReadReg16(dev, (uint8_t)(REG_RESULT_RANGE_STATUS + 10), &range);
     if (st != HAL_OK) return st;
 
     WriteReg8(dev, REG_SYSTEM_INTERRUPT_CLEAR, 0x01);
@@ -466,20 +484,14 @@ HAL_StatusTypeDef VL53L0X_ReadRangeSingleMillimeters(VL53L0X_Dev_t *dev, uint16_
     return HAL_OK;
 }
 
-/* ========================================================================
- *  Continuous mode + filtered reads (added for the micromouse)
- * ======================================================================== */
+// ---- Continuous mode + filtered reads ---------------------------------------
 
-/* SetMeasurementTimingBudget() and GetMeasurementTimingBudget() already
- * exist as static helpers above; expose the setter publicly here.        */
-HAL_StatusTypeDef VL53L0X_SetTimingBudget(VL53L0X_Dev_t *dev, uint32_t budget_us)
-{
+HAL_StatusTypeDef VL53L0X_SetTimingBudget(VL53L0X_Dev_t* dev, uint32_t budget_us) {
     return SetMeasurementTimingBudget(dev, budget_us) ? HAL_OK : HAL_ERROR;
 }
 
-HAL_StatusTypeDef VL53L0X_StartContinuous(VL53L0X_Dev_t *dev, uint32_t period_ms)
-{
-    /* Re-apply the stop variable, same preamble the single-shot read uses. */
+HAL_StatusTypeDef VL53L0X_StartContinuous(VL53L0X_Dev_t* dev, uint32_t period_ms) {
+    // Re-apply the stop variable, same preamble the single-shot read uses.
     WriteReg8(dev, 0x80, 0x01);
     WriteReg8(dev, 0xFF, 0x01);
     WriteReg8(dev, 0x00, 0x00);
@@ -488,32 +500,22 @@ HAL_StatusTypeDef VL53L0X_StartContinuous(VL53L0X_Dev_t *dev, uint32_t period_ms
     WriteReg8(dev, 0xFF, 0x00);
     WriteReg8(dev, 0x80, 0x00);
 
-    if (period_ms != 0)
-    {
-        /* Timed continuous: pace readings to period_ms. The interval is
-         * stored in a macro-clock-corrected register.                    */
+    if (period_ms != 0) {
+        // Timed continuous: interval register is corrected by the oscillator calibration.
         uint16_t osc_cal = 0;
-        ReadReg16(dev, 0xF8 /* OSC_CALIBRATE_VAL */, &osc_cal);
+        ReadReg16(dev, REG_OSC_CALIBRATE_VAL, &osc_cal);
         uint32_t period = period_ms;
-        if (osc_cal != 0)
-        {
-            period *= osc_cal;
-        }
-        uint8_t buf[4] = {
-            (uint8_t)((period >> 24) & 0xFF), (uint8_t)((period >> 16) & 0xFF),
-            (uint8_t)((period >> 8) & 0xFF),  (uint8_t)(period & 0xFF)
-        };
-        HAL_I2C_Mem_Write(dev->hi2c, dev->address,
-                          REG_SYSTEM_INTERMEASUREMENT_PERIOD, I2C_MEMADD_SIZE_8BIT,
-                          buf, 4, IO_TIMEOUT_MS);
-        WriteReg8(dev, REG_SYSRANGE_START, 0x04);  /* timed continuous */
-    }
-    else
-    {
-        WriteReg8(dev, REG_SYSRANGE_START, 0x02);  /* back-to-back continuous */
+        if (osc_cal != 0) { period *= osc_cal; }
+        uint8_t buf[4] = {(uint8_t)((period >> 24) & 0xFF), (uint8_t)((period >> 16) & 0xFF),
+                          (uint8_t)((period >> 8) & 0xFF), (uint8_t)(period & 0xFF)};
+        HAL_I2C_Mem_Write(dev->hi2c, dev->address, REG_SYSTEM_INTERMEASUREMENT_PERIOD,
+                          I2C_MEMADD_SIZE_8BIT, buf, 4, IO_TIMEOUT_MS);
+        WriteReg8(dev, REG_SYSRANGE_START, 0x04);  // timed continuous
+    } else {
+        WriteReg8(dev, REG_SYSRANGE_START, 0x02);  // back-to-back continuous
     }
 
-    /* Reset filter state so stale samples from a previous mode don't leak. */
+    // Reset filter state so stale samples from a previous mode don't leak.
     dev->window_count = 0;
     dev->window_index = 0;
     dev->ema_valid    = false;
@@ -523,9 +525,8 @@ HAL_StatusTypeDef VL53L0X_StartContinuous(VL53L0X_Dev_t *dev, uint32_t period_ms
     return HAL_OK;
 }
 
-HAL_StatusTypeDef VL53L0X_StopContinuous(VL53L0X_Dev_t *dev)
-{
-    WriteReg8(dev, REG_SYSRANGE_START, 0x01);  /* stop */
+HAL_StatusTypeDef VL53L0X_StopContinuous(VL53L0X_Dev_t* dev) {
+    WriteReg8(dev, REG_SYSRANGE_START, 0x01);  // stop
     WriteReg8(dev, 0xFF, 0x01);
     WriteReg8(dev, 0x00, 0x00);
     WriteReg8(dev, 0x91, 0x00);
@@ -534,23 +535,16 @@ HAL_StatusTypeDef VL53L0X_StopContinuous(VL53L0X_Dev_t *dev)
     return HAL_OK;
 }
 
-/* Insertion-sort median of the current window. Window is small (3 or 5)
- * so this is trivially cheap. Operates on a copy so the ring is intact. */
-static uint16_t MedianOfWindow(const VL53L0X_Dev_t *dev)
-{
+// Insertion-sort median on a copy of the (small) window, leaving the ring intact.
+static uint16_t MedianOfWindow(const VL53L0X_Dev_t* dev) {
     uint16_t tmp[TOF_MEDIAN_WINDOW];
     uint8_t  n = dev->window_count;
 
-    for (uint8_t i = 0; i < n; i++)
-    {
-        tmp[i] = dev->window[i];
-    }
-    for (uint8_t i = 1; i < n; i++)
-    {
+    for (uint8_t i = 0; i < n; i++) { tmp[i] = dev->window[i]; }
+    for (uint8_t i = 1; i < n; i++) {
         uint16_t key = tmp[i];
         int8_t   j   = (int8_t)(i - 1);
-        while (j >= 0 && tmp[j] > key)
-        {
+        while (j >= 0 && tmp[j] > key) {
             tmp[j + 1] = tmp[j];
             j--;
         }
@@ -559,76 +553,49 @@ static uint16_t MedianOfWindow(const VL53L0X_Dev_t *dev)
     return tmp[n / 2];
 }
 
-HAL_StatusTypeDef VL53L0X_ReadRangeContinuousFiltered(VL53L0X_Dev_t *dev, uint16_t *out_mm)
-{
-    /* Non-blocking: is a new measurement actually ready? */
+HAL_StatusTypeDef VL53L0X_ReadRangeContinuousFiltered(VL53L0X_Dev_t* dev, uint16_t* out_mm) {
+    // Non-blocking: is a new measurement actually ready?
     uint8_t int_status = 0;
-    if (ReadReg8(dev, REG_RESULT_INTERRUPT_STATUS, &int_status) != HAL_OK)
-    {
-        return HAL_TIMEOUT;   /* bus fault, distinct from a bad range status */
+    if (ReadReg8(dev, REG_RESULT_INTERRUPT_STATUS, &int_status) != HAL_OK) {
+        return HAL_TIMEOUT;  // bus fault, distinct from a bad range status
     }
-    if ((int_status & 0x07) == 0)
-    {
-        /* Nothing new yet — hand back the last good filtered value. */
+    if ((int_status & 0x07) == 0) {
+        // Nothing new yet — hand back the last good filtered value.
         if (dev->ema_valid) { *out_mm = (uint16_t)dev->ema; }
         return HAL_BUSY;
     }
 
-    /* One burst read of the result block: status byte at +0, distance
-     * (16-bit big-endian) at +10. Previously two separate transactions. */
+    // One burst read: status byte at +0, distance (16-bit big-endian) at +10.
     uint8_t blk[12];
-    if (ReadMulti(dev, REG_RESULT_RANGE_STATUS, blk, sizeof blk) != HAL_OK)
-    {
-        return HAL_TIMEOUT;
-    }
+    if (ReadMulti(dev, REG_RESULT_RANGE_STATUS, blk, sizeof blk) != HAL_OK) { return HAL_TIMEOUT; }
     const uint8_t  range_status = blk[0];
     const uint16_t raw          = (uint16_t)((blk[10] << 8) | blk[11]);
 
-    /* Clear the interrupt so the sensor can post the next reading. */
-    if (WriteReg8(dev, REG_SYSTEM_INTERRUPT_CLEAR, 0x01) != HAL_OK)
-    {
-        return HAL_TIMEOUT;
-    }
+    // Clear the interrupt so the sensor can post the next reading.
+    if (WriteReg8(dev, REG_SYSTEM_INTERRUPT_CLEAR, 0x01) != HAL_OK) { return HAL_TIMEOUT; }
 
-    /* The range status code is in bits [6:3] of RESULT_RANGE_STATUS.
-     * Code 11 (0x0B) is a valid measurement; anything else is a fault
-     * (sigma fail, signal fail, out of bounds, phase fail, etc.).        */
+    // Range status is bits [6:3]; 11 = valid, anything else is a fault.
     uint8_t status_code = (uint8_t)((range_status & 0x78) >> 3);
-    dev->last_raw_mm = raw;
-    dev->last_status = status_code;
+    dev->last_raw_mm    = raw;
+    dev->last_status    = status_code;
 
-    /* ---- Filter stage 1: status gating ----
-     * Reject anything that isn't a clean measurement. A VL53L0X also
-     * reports ~8190/8191 as an "out of range / no target" sentinel;
-     * treat those as invalid too rather than feeding a huge number in. */
-    if (status_code != 11 || raw >= 8000)
-    {
+    // Stage 1, status gate: reject bad status and the ~8190 no-target sentinel.
+    if (status_code != 11 || raw >= 8000) {
         if (dev->ema_valid) { *out_mm = (uint16_t)dev->ema; }
-        return HAL_ERROR;   /* bad reading; last good value preserved */
+        return HAL_ERROR;  // bad reading; last good value preserved
     }
 
-    /* ---- Filter stage 2: median ----
-     * Push the good raw sample into the ring, then take the median of
-     * whatever we have. Median kills isolated outlier spikes with no
-     * lag on steady readings.                                          */
+    // Stage 2, median: kills isolated spikes.
     dev->window[dev->window_index] = raw;
-    dev->window_index = (uint8_t)((dev->window_index + 1) % TOF_MEDIAN_WINDOW);
-    if (dev->window_count < TOF_MEDIAN_WINDOW)
-    {
-        dev->window_count++;
-    }
+    dev->window_index              = (uint8_t)((dev->window_index + 1) % TOF_MEDIAN_WINDOW);
+    if (dev->window_count < TOF_MEDIAN_WINDOW) { dev->window_count++; }
     uint16_t med = MedianOfWindow(dev);
 
-    /* ---- Filter stage 3: light EMA ----
-     * Smooth residual jitter. Seeded on the first good sample so it
-     * doesn't ramp up from zero.                                       */
-    if (!dev->ema_valid)
-    {
-        dev->ema = (float)med;
+    // Stage 3, EMA: smooths residual jitter; seeded by the first good sample.
+    if (!dev->ema_valid) {
+        dev->ema       = (float)med;
         dev->ema_valid = true;
-    }
-    else
-    {
+    } else {
         dev->ema += TOF_EMA_ALPHA * ((float)med - dev->ema);
     }
 

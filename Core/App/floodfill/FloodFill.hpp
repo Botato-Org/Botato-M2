@@ -1,17 +1,16 @@
+/**
+ * @file  FloodFill.hpp
+ * @brief BFS step distance to a target over the known map. No hardware.
+ */
 #ifndef APP_FLOODFILL_HPP
 #define APP_FLOODFILL_HPP
 
 #include <cstdint>
 #include "MazeMap.hpp"
 
-/*
- * FloodFill — BFS step-distance to a target over the known map. Pure
- * algorithm, no hardware.
- *
- * knownOnly = false (search, return): unknown walls are assumed open, so the
- *             robot explores optimistically.
- * knownOnly = true  (speed run): only visited cells are traversable, so the
- *             fast run never drives into a corridor it has not seen.
+/**
+ * knownOnly = false (search, return): unknown walls are assumed open.
+ * knownOnly = true (speed run): only visited cells are traversable.
  */
 class FloodFill {
 public:
@@ -31,4 +30,4 @@ private:
     void flood(const MazeMap& map, const int (*seeds)[2], int count, bool knownOnly);
 };
 
-#endif // APP_FLOODFILL_HPP
+#endif  // APP_FLOODFILL_HPP

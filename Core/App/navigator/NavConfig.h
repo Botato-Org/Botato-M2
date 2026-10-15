@@ -1,3 +1,10 @@
+/**
+ * @file  NavConfig.h
+ * @brief Navigator thresholds: decision point, wall detection, stops, parking, curves, centring.
+ *
+ * Every decision and turn happens with the wheel axle on a cell centre (DECISIONS #25).
+ * Distances are calibrated mm from each ToF lens (after ToFConfig.h).
+ */
 #ifndef APP_NAVCONFIG_H
 #define APP_NAVCONFIG_H
 
@@ -5,164 +12,88 @@
 #include "Config.h"
 #include "ControlConfig.h"
 
-/*
- * NavConfig — how the navigator interprets the maze.
- *
- * Position model: every decision and every turn happens with the WHEEL AXLE
- * on a cell centre. The robot pivots about its axle, so a turn does not move
- * it off the centre and no post-turn offset is needed. All distances below
- * are derived from the measured geometry in Config.h; values marked MEASURE
- * should be checked on the real maze with TEST_TOF_LIVE.
- */
 namespace navcfg {
 
-/* ---- Start --------------------------------------------------------------
- * Robot is parked in the start cell with its TAIL AGAINST THE BACK WALL,
- * facing the opening. The axle is then this far short of the cell centre. */
-constexpr float START_OFFSET_MM = cfg::CORRIDOR_MM * 0.5f - cfg::AXLE_TO_REAR_MM;   // 60.5
+// ---- Start ------------------------------------------------------------------
+// Parked with the tail on the back wall: the axle is this far short of the start-cell centre.
+constexpr float START_OFFSET_MM = cfg::CORRIDOR_MM * 0.5f - cfg::AXLE_TO_REAR_MM;  // 60.5
 
-/* ---- When to decide -----------------------------------------------------
- * Walls are read, and the next move chosen, while the axle is this far
- * short of the target cell centre. At that point the side sensors (30mm ahead
- * of the axle) sit exactly over the cell centre — the cleanest place to see
- * side walls, clear of the corner posts.                                    */
-constexpr float SENSE_LOOKAHEAD_MM = cfg::TOF_SIDE_AHEAD_MM;                        // 30
+// ---- Decision point ---------------------------------------------------------
+// Side sensors are exactly over the target cell centre, clear of the corner posts.
+constexpr float SENSE_LOOKAHEAD_MM = cfg::TOF_SIDE_AHEAD_MM;  // 30
 
-/* ===========================================================================
- * >>> WALL DETECTION — tune the thresholds here <<<
- *
- * All values are CALIBRATED mm from each sensor's lens (after ToFConfig.h).
- * Measured with the robot centred in a cell, in a 180mm corridor:
- *
- *   side wall   Left ~59.7, Right ~63.7     no wall: ~250 or no target
- *   front wall  44 centred in the cell,     no wall: next wall ~266
- *               ~74 at the decision point (SENSE_LOOKAHEAD_MM earlier)
- *
- * A wall counts as PRESENT when the reading is BELOW its threshold. Keep each
- * threshold well above the with-wall reading (the robot is never exactly
- * centred: ~25mm of sideways error moves a side reading by 25mm) and well
- * below the no-wall reading. Check the result live with TEST_TOF_LIVE
- * (tofLive.wallLeft / wallFront / wallRight).
- * =========================================================================== */
-constexpr float SIDE_WALL_PRESENT_MM   = 120.0f;   // wall ~60, no wall ~250
-constexpr float FRONT_STOP_MM          = 44.0f;    // front reading, centred in cell (measured)
-constexpr float FRONT_WALL_EXPECTED_MM = FRONT_STOP_MM + SENSE_LOOKAHEAD_MM;   // ~74
-constexpr float FRONT_WALL_PRESENT_MM  = 150.0f;   // wall ~74, no wall ~266
+// ---- Wall detection ---------------------------------------------------------
+// Present when the reading is BELOW the threshold. Check live with TEST_TOF_LIVE.
+constexpr float SIDE_WALL_PRESENT_MM   = 120.0f;  // TUNE(TEST_TOF_LIVE): wall ~60, none ~250
+constexpr float FRONT_STOP_MM          = 44.0f;   // TUNE(TEST_TOF_LIVE): front reading, centred
+constexpr float FRONT_WALL_EXPECTED_MM = FRONT_STOP_MM + SENSE_LOOKAHEAD_MM;  // ~74
+constexpr float FRONT_WALL_PRESENT_MM  = 150.0f;  // TUNE(TEST_TOF_LIVE): wall ~74, none ~266
 
-// Guard rails: a tuning slip that would misread walls fails the build.
 static_assert(SIDE_WALL_PRESENT_MM > 90.0f && SIDE_WALL_PRESENT_MM < 220.0f,
               "SIDE_WALL_PRESENT_MM must sit between a side wall (~60) and no wall (~250)");
 static_assert(FRONT_WALL_PRESENT_MM > FRONT_WALL_EXPECTED_MM + 30.0f &&
-              FRONT_WALL_PRESENT_MM < FRONT_WALL_EXPECTED_MM + cfg::CELL_PITCH_MM - 30.0f,
+                  FRONT_WALL_PRESENT_MM < FRONT_WALL_EXPECTED_MM + cfg::CELL_PITCH_MM - 30.0f,
               "FRONT_WALL_PRESENT_MM must sit between a front wall and the next wall back");
 
-/* ---- Start-corner detection ---------------------------------------------
- * A side opening where the map has the outer wall proves the maze is on the
- * other side of the start. Must be a VALID reading this far: a real wall
- * reads ~60mm, the next wall through an opening ~250mm or no target.      */
-constexpr float OUTER_OPEN_MM = 200.0f;
+// ---- Start-corner detection (DECISIONS #30) ---------------------------------
+constexpr float OUTER_OPEN_MM = 200.0f;  // valid side reading beyond this = outer wall is open
 
-/* ---- Front-wall stop -----------------------------------------------------
- * Stopping on a front wall uses the front ToF (absolute) instead of the
- * encoders, and re-anchors position — every front wall erases drift. The
- * robot stops when the front reading reaches FRONT_STOP_MM (tuning block).  */
-constexpr float FRONT_REF_MAX_MM  = 120.0f;   // only trust the front wall this close
+// ---- Front-wall stop --------------------------------------------------------
+constexpr float FRONT_REF_MAX_MM = 120.0f;  // only re-anchor on a front wall this close
 static_assert(FRONT_REF_MAX_MM > FRONT_WALL_EXPECTED_MM + 20.0f,
               "FRONT_REF_MAX_MM must cover the front wall seen from the decision point");
-// Delay of the front-ToF distance behind the real distance while moving,
-// from the pipeline in tof/ToFConfig.h: half a 20 ms measurement + one sample
-// for the median-of-3 + one EMA lag (alpha 0.6) ~= 47 ms. Compensated as
-// speed * delay. Raise it if fast stops end too close to the wall, lower it
-// if they stop short (see the tuning notes).
-constexpr float FRONT_LATENCY_S   = 0.047f;
+// Pipeline lag: half a 20 ms sample + median-of-3 + EMA ~= 47 ms, compensated as speed × lag.
+constexpr float FRONT_LATENCY_S = 0.047f;  // TUNE(maze): raise if fast stops end too close
 
-/* ---- Braking -------------------------------------------------------------
- * Braking follows v = sqrt(2 * decel * remaining), so the robot arrives at the
- * stop point at zero speed. Slightly below the control-loop DECEL so the
- * reference never demands more than the ramp can deliver.                  */
-constexpr float    BRAKE_DECEL_MMPS2 = 0.8f * cfg::DECEL_MMPS2;
+// ---- Braking: v = sqrt(2 · decel · remaining) -------------------------------
+constexpr float    BRAKE_DECEL_MMPS2 = 0.8f * cfg::DECEL_MMPS2;  // below the ramp limit
 constexpr float    CREEP_MMPS        = 40.0f;
-constexpr float    CREEP_ZONE_MM     = 6.0f;    // last mm covered at creep speed
+constexpr float    CREEP_ZONE_MM     = 6.0f;  // last mm covered at creep speed
 constexpr float    STOP_TOL_MM       = 1.0f;
 constexpr float    SETTLE_MMPS       = 15.0f;
 constexpr uint32_t SETTLE_TIMEOUT_MS = 400;
 constexpr float    PARK_SPEED_MMPS   = 150.0f;
 
-// Stall guard. The last millimetres of every stop run at CREEP_MMPS; under load
-// a small gear motor can stop turning there (static friction, a tail touching
-// the wall). Without a guard the robot waits forever for the last 1mm — and a
-// search that never finishes parking never marks itself done. No progress of
-// STALL_PROGRESS_MM for STALL_MS counts as arrived:
-//   stops:   only within STALL_ARRIVE_MM of the stop point
-//   parking: anywhere (it is backing towards a wall), plus a hard time limit
+// ---- Stall guard ------------------------------------------------------------
+// No STALL_PROGRESS_MM for STALL_MS counts as arrived: within STALL_ARRIVE_MM on a stop,
+// anywhere while parking (plus PARK_TIMEOUT_MS), so a stalled creep can't hang the run.
 constexpr uint32_t STALL_MS          = 300;
 constexpr float    STALL_PROGRESS_MM = 0.5f;
 constexpr float    STALL_ARRIVE_MM   = 10.0f;
 constexpr uint32_t PARK_TIMEOUT_MS   = 4000;
-// Parking stops this short of the back wall. Reversing lands within ~3mm and
-// the robot can sit ~0.5 deg off square, which swings a tail corner ~0.4mm:
-// 8mm keeps clear contact-free. The next run starting from this parked pose
-// accounts for the gap (Navigator::begin).
-constexpr float    PARK_GAP_MM       = 8.0f;
+constexpr float    PARK_GAP_MM       = 8.0f;  // stop short of the back wall; next run allows for it
 
-// A search run only learns it must stop when it reaches the decision point,
-// SENSE_LOOKAHEAD_MM before the centre. It must be able to stop in that room.
-static_assert(cfg::SEARCH_SPEED_MMPS * cfg::SEARCH_SPEED_MMPS
-              <= 2.0f * BRAKE_DECEL_MMPS2 * (SENSE_LOOKAHEAD_MM - CREEP_ZONE_MM),
+static_assert(cfg::SEARCH_SPEED_MMPS * cfg::SEARCH_SPEED_MMPS <=
+                  2.0f * BRAKE_DECEL_MMPS2 * (SENSE_LOOKAHEAD_MM - CREEP_ZONE_MM),
               "SEARCH_SPEED_MMPS too high to brake within SENSE_LOOKAHEAD_MM: "
               "lower the speed or raise DECEL_MMPS2 in Config.h");
 
-/* ---- Curved turns (speed run and its drive home) ------------------------
- * A curve starts half a driven cell (CELL_TRAVEL_MM / 2) before the turn
- * cell's centre and ends half a cell after it on the new corridor, centred on
- * the inside corner post. Checked for this robot (81.5 wide): >= 37 mm from
- * the outside walls and >= 49 mm from the inside post all the way round.
- * On known-path runs the next move is decided this much before that point,
- * so the robot knows in time to start a curve.                              */
-constexpr float ARC_DECIDE_MARGIN_MM = 20.0f;
-
-// >>> CURVE START TIMING (tune in the maze, after TEST_CURVE) <<<
-// Real mm by which every curve starts EARLIER than the geometric start point
-// (half a cell before the turn cell's centre). Use it if curves start late
-// (robot runs deep into the corner, exits on the outside of the new
-// corridor); negative if they start early (exits on the inside).
-constexpr float ARC_START_ADVANCE_MM = 0.0f;
+// ---- Curved turns -----------------------------------------------------------
+// A curve runs from half a cell before the turn-cell centre to half a cell after it.
+constexpr float ARC_DECIDE_MARGIN_MM = 20.0f;  // decide this much before the curve start
+constexpr float ARC_START_ADVANCE_MM = 0.0f;   // TUNE(maze): + if curves start late, - if early
 static_assert(ARC_START_ADVANCE_MM > -40.0f && ARC_START_ADVANCE_MM < 60.0f,
               "ARC_START_ADVANCE_MM out of range: expected a few mm to a few tens of mm");
-// Approaching a curve whose cell has a known front wall, the front ToF sets
-// where the curve starts (from the moment the curve is decided until it
-// begins), so encoder drift cannot shift it. Readings further than
-// ARC_FRONT_REF_MAX_MM are not used, nor any that disagree with the encoders
-// by more than ARC_FRONT_REF_GATE_MM (a post or an angled view, not the wall).
+// Front ToF sets the curve start when the cell has a known front wall; gated against encoders.
 constexpr float ARC_FRONT_REF_MAX_MM  = 300.0f;
 constexpr float ARC_FRONT_REF_GATE_MM = 60.0f;
 static_assert(cfg::CURVE_SPEED_MMPS > 0.0f, "CURVE_SPEED_MMPS must be positive");
 
-/* ---- Lateral wall centring ------------------------------------------------
- * Trims the heading setpoint (DECISIONS.md #28), never the rate.           */
-// Measured with TEST_TOF_LIVE, robot exactly centred (tofLive.sideSum / sideDiff).
-constexpr float WC_SUM_CENTERED_MM = 122.4f;  // left + right when centred
-constexpr float WC_CENTER_TRIM_MM  = -4.9f;   // left - right when centred
-// What each side reads when centred, used when only ONE wall is visible.
+// ---- Lateral wall centring (DECISIONS #28) ----------------------------------
+constexpr float WC_SUM_CENTERED_MM   = 122.4f;  // TUNE(TEST_TOF_LIVE): tofLive.sideSum
+constexpr float WC_CENTER_TRIM_MM    = -4.9f;   // TUNE(TEST_TOF_LIVE): tofLive.sideDiff
 constexpr float WC_LEFT_CENTERED_MM  = 0.5f * (WC_SUM_CENTERED_MM + WC_CENTER_TRIM_MM);  // ~58.8
 constexpr float WC_RIGHT_CENTERED_MM = 0.5f * (WC_SUM_CENTERED_MM - WC_CENTER_TRIM_MM);  // ~63.7
-constexpr float WC_WIDTH_TOL_MM    = 15.0f;   // both-wall sanity window
-constexpr float WC_DEADBAND_MM     = 2.0f;
-constexpr float WC_POST_GATE_MM    = 25.0f;   // ignore side walls near a post
-// Wall-end protection. A side is only followed while its wall really
-// continues beside the sensor:
-//  - cell walls already in the map: a side the map marks OPEN is never used;
-//  - cell not yet sensed: the reading must stay within WC_BAND_MM of that
-//    side's centred value and must not jump longer by more than WC_JUMP_MM
-//    between samples. Either one latches that side OFF until the next cell.
-// When a wall ends, the filtered reading steps up by 100+mm in one sample, far
-// above any real sideways drift (< 1mm per sample at search speed).
-constexpr float WC_BAND_MM         = 25.0f;
-constexpr float WC_JUMP_MM         = 10.0f;
-constexpr float WC_GAIN_BOTH_WALLS = 1.00f;
-constexpr float WC_GAIN_ONE_WALL   = 0.75f;
-constexpr ctrlcfg::Gains WALL_PID  = { 0.75f, 0.004f, 0.55f, 600.0f };    // mm -> deg
+constexpr float WC_WIDTH_TOL_MM      = 15.0f;  // both-wall sanity window
+constexpr float WC_DEADBAND_MM       = 2.0f;
+constexpr float WC_POST_GATE_MM      = 25.0f;  // ignore side walls this close to a post
+// Wall-end protection: out of band or a jump longer latches that side off until the next cell.
+constexpr float          WC_BAND_MM         = 25.0f;
+constexpr float          WC_JUMP_MM         = 10.0f;
+constexpr float          WC_GAIN_BOTH_WALLS = 1.00f;
+constexpr float          WC_GAIN_ONE_WALL   = 0.75f;
+constexpr ctrlcfg::Gains WALL_PID           = {0.75f, 0.004f, 0.55f, 600.0f};  // mm -> deg
 
-} // namespace navcfg
+}  // namespace navcfg
 
-#endif // APP_NAVCONFIG_H
+#endif  // APP_NAVCONFIG_H

@@ -1,9 +1,12 @@
+/**
+ * @file  MazeMap.cpp
+ * @brief Wall map storage and neighbour helpers.
+ */
 #include "MazeMap.hpp"
 
 void MazeMap::reset() {
     for (int x = 0; x < maze::MAX_DIM; ++x)
-        for (int y = 0; y < maze::MAX_DIM; ++y)
-            cell_[x][y] = 0;
+        for (int y = 0; y < maze::MAX_DIM; ++y) cell_[x][y] = 0;
 
     for (int x = 0; x < maze::WIDTH; ++x) {
         setWall(x, 0, SOUTH);
@@ -15,15 +18,18 @@ void MazeMap::reset() {
     }
 }
 
-Dir MazeMap::opposite(Dir d) { return static_cast<Dir>((d + 2) % 4); }
+Dir MazeMap::opposite(Dir d) {
+    return static_cast<Dir>((d + 2) % 4);
+}
 
 void MazeMap::neighbour(int x, int y, Dir d, int& nx, int& ny) {
-    nx = x; ny = y;
+    nx = x;
+    ny = y;
     switch (d) {
         case NORTH: ny = y + 1; break;
-        case EAST:  nx = x + 1; break;
+        case EAST: nx = x + 1; break;
         case SOUTH: ny = y - 1; break;
-        case WEST:  nx = x - 1; break;
+        case WEST: nx = x - 1; break;
     }
 }
 
@@ -53,7 +59,6 @@ bool MazeMap::isVisited(int x, int y) const {
 }
 
 bool MazeMap::isGoal(int x, int y) const {
-    return x >= maze::GOAL_X_MIN && x <= maze::GOAL_X_MAX &&
-           y >= maze::GOAL_Y_MIN && y <= maze::GOAL_Y_MAX;
+    return x >= maze::GOAL_X_MIN && x <= maze::GOAL_X_MAX && y >= maze::GOAL_Y_MIN &&
+           y <= maze::GOAL_Y_MAX;
 }
-

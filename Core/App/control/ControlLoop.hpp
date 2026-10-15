@@ -1,3 +1,7 @@
+/**
+ * @file  ControlLoop.hpp
+ * @brief 1 kHz controller: speed ramp + heading/rate cascade with feed-forward (DECISIONS #23).
+ */
 #ifndef APP_CONTROLLOOP_HPP
 #define APP_CONTROLLOOP_HPP
 
@@ -8,65 +12,48 @@
 #include "PIDController.hpp"
 #include "MotionProfile.hpp"
 
-/*
- * ControlLoop — the 1kHz controller. tick() runs in the TIM3 ISR.
- *
- * Two axes, each fed through a motion profile before its PID:
- *
- *   forward   setForwardSpeed(v) -> SpeedRamp -> feed-forward + speed PID -> fwd PWM
- *   heading   turnBy(delta)      -> AngleProfile
- *               heading error    -> heading PID -> + profile rate (feed-forward)
- *               rate error       -> rate PID    -> turn PWM
- *
- * Heading error is NOT wrapped to +/-180. The gyro angle and the heading
- * reference are both continuous, so turnBy(+180) is always an anticlockwise
- * half turn with no ambiguity. Anticlockwise is positive.
- *
- * setRate() is a raw mode for tuning the rate loop in tests; it bypasses the
- * heading loop until the next turnBy()/holdHeading().
- *
- * arcTurn(): curved turn while driving. The heading reference follows
- * ArcShape as a function of DISTANCE travelled (encoders), so the curve keeps
- * its shape whatever the actual speed. The planned turn rate is fed forward
- * both to the heading loop (deg/s) and to the motors (ARC_RATE_FF, PWM).
+/**
+ * Commands come from the main loop; tick() runs in the TIM3 ISR.
+ * Heading is anticlockwise-positive and never wrapped, so turnBy(+180) is unambiguous (#22).
  */
 class ControlLoop {
 public:
     void init(Gyro* gyro, Encoder* encL, Encoder* encR, DifferentialDrive* drive);
 
-    void enable(bool on);            // off: motors stopped, commands zeroed
+    void enable(bool on);  // off: motors stopped, commands zeroed
     bool enabled() const { return enabled_; }
-    void resetForRun();              // zero heading, profiles and PIDs
+    void resetForRun();  // zero heading, profiles and PIDs
 
-    // ---- commands (main loop) ----
+    // ---- Commands (main loop) -----------------------------------------------
     void setForwardSpeed(float mmps);
     void turnBy(float deltaDeg);
-    void holdHeading();              // leave raw mode, hold the current goal
-    void setHeadingTrim(float deg);  // wall-centring lean, clamped
-    void setRate(float mmps, float dps);
+    void holdHeading();                   // leave raw mode, hold the current goal
+    void setHeadingTrim(float deg);       // wall-centring lean, clamped
+    void setRate(float mmps, float dps);  // raw rate mode for tests; bypasses the heading loop
 
     bool turnDone() const;
 
-    void arcTurn(float deltaDeg, float lengthMm);   // curved turn, forward speed unchanged
+    /// Curved turn while driving: heading follows ArcShape over distance, forward speed unchanged.
+    void arcTurn(float deltaDeg, float lengthMm);
     bool arcActive() const { return arcActive_; }
 
-    // ---- 1kHz ISR ----
+    // ---- 1 kHz ISR ----------------------------------------------------------
     void tick();
 
-    // ---- telemetry ----
-    float pvX()          const { return pvX_; }
-    float pvW()          const { return pvW_; }
-    float speedRef()     const { return ramp_.value(); }
-    float speedCmd()     const { return vCmd_; }
-    float headingDeg()   const { return gyro_->angleDeg(); }
-    float headingRef()   const { return heading_.pos(); }
-    float headingGoal()  const { return heading_.goal(); }
-    float rateRef()      const { return heading_.vel(); }
-    float headingErr()   const { return headingErr_; }
-    float trimDeg()      const { return trim_; }
+    // ---- Telemetry ----------------------------------------------------------
+    float pvX() const { return pvX_; }
+    float pvW() const { return pvW_; }
+    float speedRef() const { return ramp_.value(); }
+    float speedCmd() const { return vCmd_; }
+    float headingDeg() const { return gyro_->angleDeg(); }
+    float headingRef() const { return heading_.pos(); }
+    float headingGoal() const { return heading_.goal(); }
+    float rateRef() const { return heading_.vel(); }
+    float headingErr() const { return headingErr_; }
+    float trimDeg() const { return trim_; }
     float arcRateFfDps() const { return arcFfDps_; }
-    float arcMaxLagDeg() const { return arcMaxLagDeg_; }   // worst heading lag in the last curve
-    float arcEndErrDeg() const { return arcEndErrDeg_; }   // heading error when it ended
+    float arcMaxLagDeg() const { return arcMaxLagDeg_; }  // worst heading lag in the last curve
+    float arcEndErrDeg() const { return arcEndErrDeg_; }  // heading error when it ended
 
 private:
     Gyro*              gyro_  = nullptr;
@@ -74,21 +61,21 @@ private:
     Encoder*           encR_  = nullptr;
     DifferentialDrive* drive_ = nullptr;
 
-    volatile bool enabled_ = false;
-    bool     rawMode_    = false;
-    float    vCmd_       = 0.0f;
-    float    rawRateCmd_ = 0.0f;
-    float    trim_       = 0.0f;
-    uint32_t turnTicks_  = 0;
+    volatile bool enabled_    = false;
+    bool          rawMode_    = false;
+    float         vCmd_       = 0.0f;
+    float         rawRateCmd_ = 0.0f;
+    float         trim_       = 0.0f;
+    uint32_t      turnTicks_  = 0;
 
-    // Curved turn state (written under CriticalSection, run in the ISR).
-    volatile bool arcActive_ = false;
-    float arcStartDeg_ = 0.0f;   // heading at the start of the curve
-    float arcDeltaDeg_ = 0.0f;   // +90 left, -90 right
-    float arcLenMm_    = 0.0f;   // curve length along the axle path
-    float arcS0Mm_     = 0.0f;   // axle distance when the curve started
-    float arcFfDps_    = 0.0f;   // planned turn rate right now
-    float arcFfPwmDps_ = 0.0f;   // rate the motors are driven for (gain, lead applied)
+    // curved turn state (written under CriticalSection, run in the ISR)
+    volatile bool arcActive_   = false;
+    float         arcStartDeg_ = 0.0f;  // heading at the start of the curve
+    float         arcDeltaDeg_ = 0.0f;  // +90 left, -90 right
+    float         arcLenMm_    = 0.0f;  // curve length along the axle path
+    float         arcS0Mm_     = 0.0f;  // axle distance when the curve started
+    float         arcFfDps_    = 0.0f;  // planned turn rate right now
+    float         arcFfPwmDps_ = 0.0f;  // rate the motors are driven for (gain, lead applied)
     float arcMaxLagDeg_ = 0.0f;  // diagnostics: + = heading behind the plan (curve going wide)
     float arcEndErrDeg_ = 0.0f;
 
@@ -97,9 +84,9 @@ private:
 
     float pvX_ = 0.0f, pvW_ = 0.0f, headingErr_ = 0.0f;
 
-    PIDController pidSpeed_  {ctrlcfg::SPEED};
-    PIDController pidRate_   {ctrlcfg::RATE};
+    PIDController pidSpeed_{ctrlcfg::SPEED};
+    PIDController pidRate_{ctrlcfg::RATE};
     PIDController pidHeading_{ctrlcfg::HEADING};
 };
 
-#endif // APP_CONTROLLOOP_HPP
+#endif  // APP_CONTROLLOOP_HPP

@@ -1,17 +1,15 @@
+/**
+ * @file  ButtonManager.hpp
+ * @brief Two active-low buttons, polled and debounced in the main loop (DECISIONS #6).
+ */
 #ifndef APP_BUTTONMANAGER_HPP
 #define APP_BUTTONMANAGER_HPP
 
 #include <cstdint>
 
-/*
- * ButtonManager — two active-low buttons, polled and debounced in the main
- * loop (DECISIONS.md #6: deliberately not EXTI).
- *
- *   PA6 (BTN2) "search":  short press, long press
- *   PA5 (BTN1) "fast":    short press, long press
- *   both together:        one both-press event, suppresses the shorts
- *
- * Events are one-shot: take*() returns true once, then clears.
+/**
+ * PA6 (BTN2) "search" and PA5 (BTN1) "fast": short and long press; both together = one
+ * both-press event that suppresses the shorts. Events are one-shot: take*() returns true once.
  */
 class ButtonManager {
 public:
@@ -23,29 +21,29 @@ public:
     bool takeSearchLong();
     bool takeFastLong();
     bool takeBothPress();
-    bool takeAny();              // consumes every pending event
+    bool takeAny();  // consumes every pending event
 
     bool searchHeld() const { return search_.pressed; }
-    bool fastHeld()   const { return fast_.pressed; }
+    bool fastHeld() const { return fast_.pressed; }
 
 private:
     struct Btn {
-        bool     pressed   = false;   // debounced state
+        bool     pressed   = false;  // debounced state
         uint32_t downTime  = 0;
         bool     longFired = false;
-        bool     raw       = false;   // last raw sample
-        uint32_t rawSince  = 0;       // when the raw level last changed
+        bool     raw       = false;  // last raw sample
+        uint32_t rawSince  = 0;      // when the raw level last changed
     };
     Btn search_, fast_;
     static bool debounce(Btn& b, bool raw, uint32_t now);
 
-    bool searchShortEvt_ = false;
-    bool fastShortEvt_   = false;
-    bool searchLongEvt_  = false;
-    bool fastLongEvt_    = false;
-    bool bothEvt_        = false;
-    bool bothLatched_    = false;
-    uint32_t lastSample_ = 0;
+    bool     searchShortEvt_ = false;
+    bool     fastShortEvt_   = false;
+    bool     searchLongEvt_  = false;
+    bool     fastLongEvt_    = false;
+    bool     bothEvt_        = false;
+    bool     bothLatched_    = false;
+    uint32_t lastSample_     = 0;
 };
 
-#endif // APP_BUTTONMANAGER_HPP
+#endif  // APP_BUTTONMANAGER_HPP

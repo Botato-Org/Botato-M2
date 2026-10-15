@@ -1,3 +1,7 @@
+/**
+ * @file  Indicator.cpp
+ * @brief LED pattern sequencer.
+ */
 #include "Indicator.hpp"
 #include "IndicatorConfig.h"
 
@@ -8,10 +12,10 @@ void Indicator::write(bool on) {
 void Indicator::init() {
     __HAL_RCC_GPIOC_CLK_ENABLE();
     GPIO_InitTypeDef g = {};
-    g.Pin   = ledcfg::PIN;
-    g.Mode  = GPIO_MODE_OUTPUT_PP;
-    g.Pull  = GPIO_NOPULL;
-    g.Speed = GPIO_SPEED_FREQ_LOW;
+    g.Pin              = ledcfg::PIN;
+    g.Mode             = GPIO_MODE_OUTPUT_PP;
+    g.Pull             = GPIO_NOPULL;
+    g.Speed            = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(ledcfg::PORT, &g);
     pulsing_ = false;
     set(OFF);
@@ -19,13 +23,13 @@ void Indicator::init() {
 }
 
 void Indicator::set(Pattern p) {
-    if (p == pattern_) return;       // re-setting must not restart the cycle
+    if (p == pattern_) return;  // re-setting must not restart the cycle
     pattern_ = p;
     step_    = 0;
     lastMs_  = HAL_GetTick();
     if (p == PASS) flashes_ = 2;
     if (p == FAIL) flashes_ = 3;
-    if (p == BLINK) write(true);     // visible immediately
+    if (p == BLINK) write(true);  // visible immediately
 }
 
 void Indicator::code(int flashes) {
@@ -47,36 +51,45 @@ void Indicator::update() {
 
     if (pulsing_) {
         if (now - pulseStart_ < ledcfg::PULSE_MS) return;
-        pulsing_ = false;            // fall through to the base pattern
+        pulsing_ = false;  // fall through to the base pattern
     }
 
     const uint32_t dt = now - lastMs_;
     switch (pattern_) {
-    case OFF: write(false); break;
-    case ON:  write(true);  break;
+        case OFF: write(false); break;
+        case ON: write(true); break;
 
-    case HEARTBEAT:
-        if (dt >= ledcfg::HEART_PERIOD_MS) lastMs_ = now;
-        write((now - lastMs_) < ledcfg::HEART_ON_MS);
-        break;
+        case HEARTBEAT:
+            if (dt >= ledcfg::HEART_PERIOD_MS) lastMs_ = now;
+            write((now - lastMs_) < ledcfg::HEART_ON_MS);
+            break;
 
-    case RAPID:
-        if (dt >= ledcfg::RAPID_MS) { lastMs_ = now; step_ ^= 1; }
-        write(step_ == 0);
-        break;
+        case RAPID:
+            if (dt >= ledcfg::RAPID_MS) {
+                lastMs_ = now;
+                step_ ^= 1;
+            }
+            write(step_ == 0);
+            break;
 
-    case BLINK:
-        if (dt >= ledcfg::BLINK_MS) { lastMs_ = now; step_ ^= 1; }
-        write(step_ == 0);
-        break;
+        case BLINK:
+            if (dt >= ledcfg::BLINK_MS) {
+                lastMs_ = now;
+                step_ ^= 1;
+            }
+            write(step_ == 0);
+            break;
 
-    case PASS:   // 2 flashes, pause
-    case FAIL:   // 3 flashes, pause
-    case CODE: { // n flashes, pause
-        const int cycle = flashes_ * 2 + 4;           // flashes, then 4 steps dark
-        if (dt >= ledcfg::PATTERN_MS) { lastMs_ = now; step_ = (step_ + 1) % cycle; }
-        write(step_ < flashes_ * 2 && (step_ % 2) == 0);
-        break;
-    }
+        case PASS:                               // 2 flashes, pause
+        case FAIL:                               // 3 flashes, pause
+        case CODE: {                             // n flashes, pause
+            const int cycle = flashes_ * 2 + 4;  // flashes, then 4 steps dark
+            if (dt >= ledcfg::PATTERN_MS) {
+                lastMs_ = now;
+                step_   = (step_ + 1) % cycle;
+            }
+            write(step_ < flashes_ * 2 && (step_ % 2) == 0);
+            break;
+        }
     }
 }
