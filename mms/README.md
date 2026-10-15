@@ -1,50 +1,62 @@
 # BOTATO in mms
 
-Runs the firmware's flood fill in [mms](https://github.com/mackorone/mms) (the Micromouse Simulator).
+Runs the firmware's flood fill in [mms](https://github.com/mackorone/mms) (the Micromouse
+Simulator). Nothing is copied: the build compiles the maze code straight from `Core/App`.
 
-Nothing is copied. The build compiles these files straight from the firmware tree:
+```mermaid
+flowchart LR
+    subgraph App["Core/App (shared)"]
+        FF["floodfill/FloodFill"]
+        MM["maze/MazeMap · MazeConfig.h"]
+        PL["planner/Planner"]
+    end
+    App --> BM["mms/BotatoMms.cpp<br/>+ API.cpp"] --> EXE["botato_mms.exe"] <--> MMS["mms simulator"]
+    NAV["Navigator.cpp<br/>(firmware only)"] -. "twin functions" .- BM
+```
 
-| File | What it gives |
-|---|---|
-| `Core/App/floodfill/FloodFill.cpp/.hpp` | the flood fill |
-| `Core/App/maze/MazeMap.cpp/.hpp`, `MazeConfig.h` | wall map, maze size, start, goal box |
-| `Core/App/planner/Planner.cpp/.hpp` | pose and turn logic |
+Change a shared file, press **Build** in mms, and the simulator runs the new code.
 
-Change any of them, press **Build** in mms, and the simulator runs the new code.
+## Set up (once)
 
-## Set up in mms (once)
-
-Mouse → **+** (new mouse config):
+Mouse → **+**:
 
 | Field | Value |
 |---|---|
 | Name | `BOTATO` |
-| Directory | `C:\New volume\Botato\MicroMouse\Botato-Micromouse-1.0\mms` |
+| Directory | `C:\New volume\Botato\MicroMouse\Botato-M2\mms` |
 | Build Command | `cmd /c build.bat` |
 | Run Command | `cmd /c botato_mms.exe --mirror` |
 
-Load any 16×16 classic maze, then **Build** and **Run**.
-
-`build.bat` uses `g++` from your PATH. If there isn't one, it falls back to the MinGW that comes with CLion.
-
-## Run options (add them to the Run Command)
+Load a 16×16 classic maze, then **Build** and **Run**. `build.bat` uses `g++` from PATH, else
+CLion's MinGW.
 
 | Option | Effect |
 |---|---|
-| `--mirror` | The robot sees the mms maze mirrored, so the maze is on its **left**. This is the ROBOFEST 2026 layout and matches `START_X = WIDTH-1`. |
-| *(no `--mirror`)* | The maze is on the robot's right, as mms normally has it. The firmware's start-corner detection has to work that out, which tests that code too. |
-| `--speed-runs N` | Number of speed runs after the search (default 1). |
-| `--no-text` | Don't draw the flood distances (runs faster). |
+| `--mirror` | Maze on the robot's **left** (ROBOFEST 2026, `START_X = WIDTH−1`) |
+| *(none)* | Maze on the right; exercises start-corner detection |
+| `--speed-runs N` | Speed runs after the search (default 1) |
+| `--no-text` | Don't draw flood distances (faster) |
 
-The run order is the same as on the robot. First a search to the goal, then the return home, still exploring. Then speed runs over visited cells only, each one driving itself home. The **Reset** button in mms works like lifting the robot back to the start: the map is kept. If the goal was already reached, the next run is a speed run. If not, a fresh search starts.
+## Run order (same as the robot)
 
-On the mms map: dark blue = search, cyan = return while exploring, dark green = speed run, green = return over known cells. The numbers are FloodFill distances. The log pane shows cells, turns and decisions for each leg, plus the length of the known path.
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Search: dark blue
+    Search --> Return: goal · cyan, still exploring
+    Return --> Speed: home · dark green, known cells
+    Speed --> Home: goal · green
+    Home --> Speed: next speed run
+```
 
-## What is *not* shared with the firmware
+**Reset** in mms = lifting the robot back to the start: the map is kept. Numbers on the map are
+flood distances; the log shows cells, turns and decisions per leg.
 
-`Navigator.cpp` drives motors, encoders and ToF sensors, so it can't run in mms. `BotatoMms.cpp` has a copy of its cell-level decision logic (`senseWalls`, `decide`, `act`, start-corner detection, homing). Those copies are the functions marked `>>> twin of Navigator::...`.
+## Keeping it in sync
 
-- Changing **FloodFill / MazeMap / MazeConfig / Planner**: nothing else to do.
-- Changing the **search policy in Navigator.cpp**: make the same change in those marked functions.
-- Changing **FloodFill's public functions** (`toGoal`, `toCell`, `nextDir`, `distance`): update the calls in `BotatoMms.cpp`.
-- Adding a **new source file** that FloodFill depends on: add it to `build.bat` / `build.sh`.
+| You change | Also do |
+|---|---|
+| FloodFill / MazeMap / MazeConfig / Planner | nothing |
+| Search policy in `Navigator.cpp` | same change in the `>>> twin of Navigator::…` functions |
+| FloodFill's public API (`toGoal`, `toCell`, `nextDir`, `distance`) | update the calls in `BotatoMms.cpp` |
+| A new source file FloodFill needs | add it to `build.bat` / `build.sh` |
