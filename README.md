@@ -1,4 +1,4 @@
-# 🐭 BOTATO — Micromouse Robot
+# 🐭 BOTATO : Micromouse Robot
 ### STM32F411CEU6 · Maze Solver · University of Moratuwa · REV 3.0
 
 16×16 maze solver for ROBOFEST 2026: flood-fill search, speed runs on known cells, curved turns.
@@ -236,4 +236,4 @@ Values marked `TUNE(...)` in the config headers. Run the test, copy the field.
 
 ---
 
-*BOTATO — Department of Computer Science & Engineering, University of Moratuwa · REV 3.0*
+*BOTATO · REV 3.0*
