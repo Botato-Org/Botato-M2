@@ -90,7 +90,7 @@ flowchart LR
     TURN --> MIX --> DRV[DifferentialDrive]
 ```
 
-Gains and caps: `control/ControlConfig.h`. Heading is anticlockwise-positive and never wrapped.
+Gains and caps: `Core/App/control/ControlConfig.h`. Heading is anticlockwise-positive and never wrapped.
 
 ---
 
